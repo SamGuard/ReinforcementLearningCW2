@@ -79,7 +79,7 @@ class RoundingTDAgent(Agent):
         if np.random.uniform(0, 1) < self.epsilon:
             action = action_space.sample()
         else:
-            action = torch.argmax(self.q_table[discrete_state[0]]).item()
+            action = torch.argmax(self.q_table[discrete_state]).item()
 
         # Convert the discrete action to a continuous action
         continuous_action = (
