@@ -29,7 +29,7 @@ class Agent:
 
 class RoundingTDAgent(Agent):
     """
-    Sarsa-Lambda Agent (Rounding TD Agent) ?
+    Sarsa-Lambda Agent (Uniform Discretization TD Agent)
     """
 
     def __init__(
@@ -38,10 +38,11 @@ class RoundingTDAgent(Agent):
         action_space: Box,
         discrete_actions: int,
         discrete_states: int,
-        lambda_: float = 0.9,
-        epsilon: float = 0.1,
-        alpha: float = 0.1,
-        gamma: float = 0.99,
+        DEVICE: str = "cpu",
+        lambda_: float = 0.9,  # 0.95
+        epsilon: float = 0.05,
+        alpha: float = 0.1,  # 0.5,
+        gamma: float = 0.99,  # 0.95,
     ) -> None:
         super().__init__()
         self.state_space = state_space
@@ -54,20 +55,25 @@ class RoundingTDAgent(Agent):
         self.alpha = alpha
         self.gamma = gamma
 
+        self.DEVICE = DEVICE
+
         # get dimensions of tensor
         multi_dim_array_shape = [discrete_states] * len(state_space.low) + [
             discrete_actions
         ]
 
-        self.q_table = torch.zeros(multi_dim_array_shape)
-        self.eligibility_traces = torch.zeros(multi_dim_array_shape)
+        self.q_table = torch.zeros(multi_dim_array_shape).to(DEVICE)
+        self.eligibility_traces = torch.zeros(multi_dim_array_shape).to(DEVICE)
 
+    # Uniform discretization -> divided into equally sized intervals between -1 and 1.
     def discretize_state(self, state: Box):
         discrete_state = tuple(
             np.round(
                 (state - self.state_space.low)
                 / (self.state_space.high - self.state_space.low)
                 * (self.discrete_states - 1)
+                * 2
+                - 1
             ).astype(int)
         )
         return discrete_state
@@ -82,12 +88,9 @@ class RoundingTDAgent(Agent):
             action = torch.argmax(self.q_table[discrete_state]).item()
 
         # Convert the discrete action to a continuous action
-        continuous_action = (
-            action
-            / (self.discrete_actions - 1)
-            * (action_space.high - action_space.low)
-            + action_space.low
-        )
+        continuous_action = ((action * 2 / (self.discrete_actions - 1)) - 1) * (
+            action_space.high - action_space.low
+        ) + action_space.low
 
         self.action_taken = continuous_action
         return self.action_taken
