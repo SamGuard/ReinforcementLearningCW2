@@ -2,6 +2,7 @@ import torch
 from torch import nn, Tensor
 from torch.nn import functional as F
 import numpy as np
+import math
 
 from gymnasium.spaces import Box
 
@@ -38,27 +39,6 @@ class ReplayMemory(object):
 """
 -----------------------------------------------------------------------------------------
 """
-
-
-class Controller:
-    def __init__(self, action_space, alpha=0.01) -> None:
-        self.action_space = action_space
-        self.alpha = alpha
-        self.reset()
-
-    def reset(self):
-        self._vals = np.zeros(shape=(self.action_space,))
-
-    def update(self, action: int):
-        self._vals *= 0.9
-        # Scale so the action space has 1,0,-1
-        direction = action // self.action_space - 1
-        self._vals[action % self.action_space] += direction * self.alpha
-
-    @property
-    def vals(self):
-        return self._vals
-
 
 class Agent:
     """
@@ -102,6 +82,118 @@ class ValueApproximator(nn.Module):
             x = self.act(l(x))
 
         return self.output_layer(l(x))
+    
+
+class ActionClamper(ValueApproximator):
+    def __init__(self, in_dims, out_dims=1, width=8, depth=5, activation_function=F.relu) -> None:
+        super().__init__(in_dims, out_dims, width, depth, activation_function)
+    
+    def forward(self, x: Tensor):
+        N = 0.1*torch.randn(1)
+        ans = torch.tanh(super().forward(x)) + N
+        return torch.floor(ans) + 1
+        #return torch.clamp(torch.tanh(super().forward(x)) + N, -1, 1)
+    
+class DDPG(Agent):
+    def __init__(self, state_dims, num_actions, target_learn=0.001, mini_batch_len=64, device="cpu") -> None:
+        super().__init__()
+        self.memory = ReplayMemory(MAX_MEMORY)
+        self.actor = ActionClamper(state_dims, num_actions, width=64, depth=6)
+        self.critic = ValueApproximator(state_dims + num_actions, 1, width=64, depth=6)
+        
+        self.actor_target = ActionClamper(state_dims, num_actions, width=64, depth=6)
+        self.critic_target = ValueApproximator(state_dims + num_actions, 1, width=64, depth=6)
+        
+        self.actor_target.load_state_dict(deepcopy(self.actor.state_dict()))
+        self.critic_target.load_state_dict(deepcopy(self.critic.state_dict()))
+        
+        param_list = list(self.actor.parameters()) + list(self.critic.parameters())
+        self.optim = torch.optim.Adam(param_list, 1e-3)
+        
+        self.state_dims = state_dims
+        self.num_actions = num_actions
+        self.gamma = 0.99
+        self.target_learn = target_learn
+        self.mini_batch_len = mini_batch_len
+        self.device = device
+    
+    def choose_action(self, action_space: Box, state: np.ndarray):
+        self.prev_state = torch.tensor(state, device=self.device, dtype=torch.float32)
+        
+        self.action_taken = self.actor(self.prev_state).detach()
+        return self.action_taken
+    
+
+    
+    def update(self, new_state: np.ndarray, reward: float, is_terminal: bool, is_trunc: bool):
+        new_state = torch.tensor(new_state, device=self.device, dtype=torch.float32)
+        self.memory.push(
+            self.prev_state, self.action_taken, new_state, reward, is_terminal or is_trunc
+        )
+        
+        if len(self.memory.memory) < self.mini_batch_len:
+            return
+        batch = self.memory.sample(self.mini_batch_len)
+
+        batch_states_0 = torch.zeros(
+            size=(self.mini_batch_len, self.state_dims), device=self.device
+        )
+        batch_states_1 = torch.zeros(
+            size=(self.mini_batch_len, self.state_dims), device=self.device
+        )
+        terminal_mask = torch.full(
+            size=(self.mini_batch_len,),
+            fill_value=False,
+            dtype=torch.bool,
+            device=self.device,
+        )
+        actions = torch.zeros(
+            size=(self.mini_batch_len,self.num_actions), dtype=torch.long, device=self.device
+        )
+        rewards = torch.zeros(size=(self.mini_batch_len,))
+        
+        y = torch.zeros(size=(self.mini_batch_len,))
+
+        target_actions = torch.zeros(
+            size=(self.mini_batch_len, self.num_actions), device=self.device
+        )
+        
+        target_scores = torch.zeros(
+            size=(self.mini_batch_len,), device=self.device
+        )
+
+        for i, b in enumerate(batch):
+            batch_states_0[i] = b.state
+            batch_states_1[i] = b.next_state
+            terminal_mask[i] = not b.terminal
+            rewards[i] = b.reward
+            actions[i] = b.action
+
+        target_actions = self.actor_target(batch_states_1)
+
+        target_scores = self.critic_target(torch.cat((batch_states_1, target_actions), 1))
+
+        y = (self.gamma * target_scores).squeeze()
+        y += rewards
+        y = y.detach()
+
+        current_scores = self.critic(torch.cat((batch_states_0, actions), 1)).squeeze()
+
+        loss_critic = F.mse_loss(current_scores, y)
+
+        loss_actor = -self.critic(torch.cat((batch_states_0, self.actor(batch_states_0).detach()), 1)).mean()
+
+        self.optim.zero_grad()
+        loss = loss_critic + loss_actor
+        loss.backward()
+        self.optim.step()
+        #print(loss, loss_actor, loss_critic)
+
+        for target_weights, weights in zip(self.actor_target.parameters(), self.actor.parameters()):
+            target_weights.data.copy_(self.target_learn * weights.data + (1.0 - self.target_learn) * target_weights.data)
+       
+        for target_weights, weights in zip(self.critic_target.parameters(), self.critic.parameters()):
+            target_weights.data.copy_(self.target_learn * weights.data + (1.0 - self.target_learn) * target_weights.data)
 
 
 class DQN(Agent):
