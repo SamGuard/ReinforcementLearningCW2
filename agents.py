@@ -90,26 +90,31 @@ class ActionClamper(ValueApproximator):
     
     def forward(self, x: Tensor):
         N = 0.1*torch.randn(1)
-        ans = torch.tanh(super().forward(x)) + N
-        return torch.floor(ans) + 1
+        #ans = torch.clamp(torch.tanh(super().forward(x)) + N, -1, 0.999)
+        ans = torch.clamp(torch.tanh(super().forward(x)) + N, -1, 1)
+
+        #print(ans)
+        return ans
         #return torch.clamp(torch.tanh(super().forward(x)) + N, -1, 1)
     
 class DDPG(Agent):
-    def __init__(self, state_dims, num_actions, target_learn=0.001, mini_batch_len=64, device="cpu") -> None:
+    def __init__(self, state_dims, num_actions, target_learn=0.01, mini_batch_len=128, device="cpu") -> None:
         super().__init__()
         self.memory = ReplayMemory(MAX_MEMORY)
-        self.actor = ActionClamper(state_dims, num_actions, width=64, depth=6)
-        self.critic = ValueApproximator(state_dims + num_actions, 1, width=64, depth=6)
+        self.actor = ActionClamper(state_dims, num_actions, width=32, depth=5)
+        self.critic = ValueApproximator(state_dims + num_actions, 1, width=32, depth=5)
         
-        self.actor_target = ActionClamper(state_dims, num_actions, width=64, depth=6)
-        self.critic_target = ValueApproximator(state_dims + num_actions, 1, width=64, depth=6)
+        self.actor_target = ActionClamper(state_dims, num_actions, width=32, depth=5)
+        self.critic_target = ValueApproximator(state_dims + num_actions, 1, width=32, depth=5)
         
         self.actor_target.load_state_dict(deepcopy(self.actor.state_dict()))
         self.critic_target.load_state_dict(deepcopy(self.critic.state_dict()))
         
-        param_list = list(self.actor.parameters()) + list(self.critic.parameters())
-        self.optim = torch.optim.Adam(param_list, 1e-3)
+        #self.optim = torch.optim.Adam(param_list, 1e-3)
         
+        self.actor_optim = torch.optim.Adam(self.actor.parameters(), 1e-3)
+        self.critic_optim = torch.optim.Adam(self.critic.parameters(), 1e-3)
+
         self.state_dims = state_dims
         self.num_actions = num_actions
         self.gamma = 0.99
@@ -122,8 +127,6 @@ class DDPG(Agent):
         
         self.action_taken = self.actor(self.prev_state).detach()
         return self.action_taken
-    
-
     
     def update(self, new_state: np.ndarray, reward: float, is_terminal: bool, is_trunc: bool):
         new_state = torch.tensor(new_state, device=self.device, dtype=torch.float32)
@@ -169,11 +172,13 @@ class DDPG(Agent):
             rewards[i] = b.reward
             actions[i] = b.action
 
+        batch_states_1 = batch_states_1[terminal_mask]
+
         target_actions = self.actor_target(batch_states_1)
 
         target_scores = self.critic_target(torch.cat((batch_states_1, target_actions), 1))
 
-        y = (self.gamma * target_scores).squeeze()
+        y[terminal_mask] = (self.gamma * target_scores).squeeze()
         y += rewards
         y = y.detach()
 
@@ -181,13 +186,15 @@ class DDPG(Agent):
 
         loss_critic = F.mse_loss(current_scores, y)
 
-        loss_actor = -self.critic(torch.cat((batch_states_0, self.actor(batch_states_0).detach()), 1)).mean()
+        self.critic_optim.zero_grad()
+        loss_critic.backward()
+        self.critic_optim.step()
 
-        self.optim.zero_grad()
-        loss = loss_critic + loss_actor
-        loss.backward()
-        self.optim.step()
-        #print(loss, loss_actor, loss_critic)
+        loss_actor = -self.critic(torch.cat((batch_states_0, self.actor(batch_states_0)), 1)).mean()
+
+        self.actor_optim.zero_grad()
+        loss_actor.backward()
+        self.actor_optim.step()
 
         for target_weights, weights in zip(self.actor_target.parameters(), self.actor.parameters()):
             target_weights.data.copy_(self.target_learn * weights.data + (1.0 - self.target_learn) * target_weights.data)
