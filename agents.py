@@ -10,7 +10,7 @@ from copy import deepcopy
 from collections import deque, namedtuple
 import random
 
-MAX_MEMORY = 2**18
+MAX_MEMORY = 2**17
 
 """
 Code taken from https://pytorch.org/tutorials/intermediate/reinforcement_q_learning.html
@@ -89,16 +89,16 @@ class ActionClamper(ValueApproximator):
         super().__init__(in_dims, out_dims, width, depth, activation_function)
     
     def forward(self, x: Tensor):
-        N = 0.1*torch.randn(1)
+        #N = 0.1*torch.randn(1)
         #ans = torch.clamp(torch.tanh(super().forward(x)) + N, -1, 0.999)
-        ans = torch.clamp(torch.tanh(super().forward(x)) + N, -1, 1)
+        ans = torch.tanh(super().forward(x))
 
         #print(ans)
         return ans
         #return torch.clamp(torch.tanh(super().forward(x)) + N, -1, 1)
     
 class DDPG(Agent):
-    def __init__(self, state_dims, num_actions, target_learn=0.01, mini_batch_len=128, device="cpu") -> None:
+    def __init__(self, state_dims, num_actions, target_learn=0.001, mini_batch_len=128, device="cpu") -> None:
         super().__init__()
         self.memory = ReplayMemory(MAX_MEMORY)
         self.actor = ActionClamper(state_dims, num_actions, width=32, depth=5)
@@ -112,8 +112,8 @@ class DDPG(Agent):
         
         #self.optim = torch.optim.Adam(param_list, 1e-3)
         
-        self.actor_optim = torch.optim.Adam(self.actor.parameters(), 1e-3)
-        self.critic_optim = torch.optim.Adam(self.critic.parameters(), 1e-3)
+        self.actor_optim = torch.optim.Adam(self.actor.parameters(), 0.0001)
+        self.critic_optim = torch.optim.Adam(self.critic.parameters(), 0.001, weight_decay=0.001)
 
         self.state_dims = state_dims
         self.num_actions = num_actions
@@ -124,8 +124,8 @@ class DDPG(Agent):
     
     def choose_action(self, action_space: Box, state: np.ndarray):
         self.prev_state = torch.tensor(state, device=self.device, dtype=torch.float32)
-        
-        self.action_taken = self.actor(self.prev_state).detach()
+        N = 0.1*torch.randn(1)
+        self.action_taken = torch.clamp(self.actor(self.prev_state).detach() + N, -1, 1)
         return self.action_taken
     
     def update(self, new_state: np.ndarray, reward: float, is_terminal: bool, is_trunc: bool):
@@ -201,115 +201,3 @@ class DDPG(Agent):
        
         for target_weights, weights in zip(self.critic_target.parameters(), self.critic.parameters()):
             target_weights.data.copy_(self.target_learn * weights.data + (1.0 - self.target_learn) * target_weights.data)
-
-
-class DQN(Agent):
-    def __init__(
-        self, state_dims, num_actions, mini_batch_len=256, device="cpu"
-    ) -> None:
-        super().__init__()
-        self.memory = ReplayMemory(MAX_MEMORY)
-        self.epsilon = 0.1
-        self.gamma = 0.5
-        self.num_actions = num_actions
-        self.state_dims = state_dims
-
-        self.action_values = ValueApproximator(
-            state_dims, num_actions, width=32, depth=6
-        )
-        self.td_value = ValueApproximator(state_dims, num_actions, width=32, depth=6)
-        self.td_value.load_state_dict(deepcopy(self.action_values.state_dict()))
-
-        self.optim = torch.optim.Adam(self.action_values.parameters(), 1e-2)
-        self.mini_batch_len = mini_batch_len
-
-        self.device = device
-
-    def choose_action(self, action_space: Box, state: np.ndarray):
-        self.prev_state = torch.tensor(state, device=self.device, dtype=torch.float32)
-        if self.epsilon < random.random():
-            self.action_taken = self.action_values(self.prev_state)
-        else:
-            self.action_taken = torch.rand(
-                size=(action_space.shape[0],), device=self.device
-            )
-        self.action_taken = torch.argmax(self.action_taken).detach()
-        return int(self.action_taken)
-
-    def update(
-        self, new_state: np.ndarray, reward: float, is_terminal: bool, is_trunc: bool
-    ):
-        new_state = torch.tensor(new_state, device=self.device, dtype=torch.float32)
-        self.memory.push(
-            self.prev_state, self.action_taken, new_state, reward, is_terminal or is_trunc
-        )
-        
-        if len(self.memory.memory) < self.mini_batch_len:
-            return
-        batch = self.memory.sample(self.mini_batch_len)
-        batch_states_0 = torch.zeros(
-            size=(self.mini_batch_len, self.state_dims), device=self.device
-        )
-        batch_states_1 = torch.zeros(
-            size=(self.mini_batch_len, self.state_dims), device=self.device
-        )
-        terminal_mask = torch.full(
-            size=(self.mini_batch_len,),
-            fill_value=False,
-            dtype=torch.bool,
-            device=self.device,
-        )
-        td_values = torch.zeros(
-            size=(self.mini_batch_len, self.num_actions), device=self.device
-        )
-        actions = torch.zeros(
-            size=(self.mini_batch_len,), dtype=torch.long, device=self.device
-        )
-        y = torch.zeros(size=(self.mini_batch_len,))
-        rewards = torch.zeros(size=(self.mini_batch_len,))
-        for i, b in enumerate(batch):
-            batch_states_0[i] = b.state
-            batch_states_1[i] = b.next_state
-            terminal_mask[i] = not b.terminal
-            rewards[i] = b.reward
-            actions[i] = b.action
-
-        td_values = self.td_value(batch_states_1)
-        y[terminal_mask] = self.gamma * torch.max(td_values[terminal_mask], dim=1)[0]
-        y += rewards
-        y = y.detach()
-        
-        action_values = self.action_values(batch_states_0)
-        action_values = action_values[
-                torch.linspace(
-                    0, self.mini_batch_len - 1, self.mini_batch_len, dtype=torch.long
-                ),
-                actions,
-            ]
-        
-        self.optim.zero_grad()
-        loss = F.huber_loss(
-            action_values,
-            y,
-        )
-        loss.backward()
-        self.optim.step()
-
-        if random.random() < 0.1:
-            self.td_value.load_state_dict(deepcopy(self.action_values.state_dict()))
-
-
-def example_model():
-    f = ValueApproximator(in_dims=3, out_dims=3)
-    optim = torch.optim.Adam(f.parameters(), lr=1e-3)
-
-    x = torch.rand(size=(128, 3))
-    y = torch.rand(size=(128, 3))
-
-    for i in range(100):
-        pred = f(x)
-        optim.zero_grad()
-        loss = F.mse_loss(pred, y)
-        loss.backward()
-        optim.step()
-        print(loss)
