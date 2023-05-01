@@ -101,10 +101,10 @@ class DDPG(Agent):
     def __init__(self, state_dims, num_actions, target_learn=0.001, mini_batch_len=128, device="cpu") -> None:
         super().__init__()
         self.memory = ReplayMemory(MAX_MEMORY)
-        self.actor = ActionClamper(state_dims, num_actions, width=32, depth=5)
+        self.actor = ActionClamper(state_dims, num_actions, width=32, depth=5, activation_function=torch.tanh)
         self.critic = ValueApproximator(state_dims + num_actions, 1, width=32, depth=5)
         
-        self.actor_target = ActionClamper(state_dims, num_actions, width=32, depth=5)
+        self.actor_target = ActionClamper(state_dims, num_actions, width=32, depth=5, activation_function=torch.tanh)
         self.critic_target = ValueApproximator(state_dims + num_actions, 1, width=32, depth=5)
         
         self.actor_target.load_state_dict(deepcopy(self.actor.state_dict()))
