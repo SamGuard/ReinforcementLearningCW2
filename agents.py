@@ -29,8 +29,8 @@ class ReplayMemory(object):
         self.state = np.zeros((MAX_MEMORY, in_dim))
         self.action = np.zeros((MAX_MEMORY, out_dim))
         self.next_state = np.zeros((MAX_MEMORY, in_dim))
-        self.reward = np.zeros((MAX_MEMORY, 1))
-        self.terminal = np.zeros((MAX_MEMORY, 1))
+        self.reward = np.zeros((MAX_MEMORY,))
+        self.terminal = np.zeros((MAX_MEMORY,))
 
     def push(self, state, action, next_state, reward, terminal):
         self.state[self.curr] = state
@@ -50,8 +50,11 @@ class ReplayMemory(object):
             torch.tensor(self.action[rand_elems], dtype=torch.float32),
             torch.tensor(self.next_state[rand_elems], dtype=torch.float32),
             torch.tensor(self.reward[rand_elems], dtype=torch.float32),
-            torch.tensor(self.terminal[rand_elems], dtype=torch.float32)
+            torch.tensor(self.terminal[rand_elems], dtype=torch.int)
         )
+
+    def __len__(self):
+        return self.size
 
 class Agent:
     """
@@ -63,7 +66,7 @@ class Agent:
         self.prev_state = None
         self.action_taken = None
 
-    def choose_action(self, action_space: Box, state: Box):
+    def choose_action(self, state: Box, action_space: Box):
         self.prev_state = deepcopy(state)
         self.action_taken = deepcopy(action_space.sample())
         return self.action_taken
@@ -168,7 +171,8 @@ class TD3(Agent):
             
             target_critic_1, target_critic_2 = self.critic_target(next_state, next_action)
             target_critic = torch.min(target_critic_1, target_critic_2)
-            target_critic = reward + (1-terminal) * self.gamma * target_critic
+            target_critic = reward + (1 - terminal) * self.gamma * target_critic
+
 
         current_critic_1, current_critic_2 = self.critic(state, action)
         loss_critic = F.mse_loss(current_critic_1, target_critic) + F.mse_loss(current_critic_2, target_critic)
