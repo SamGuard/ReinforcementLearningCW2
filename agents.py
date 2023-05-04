@@ -11,7 +11,10 @@ from copy import deepcopy
 from collections import deque, namedtuple
 import random
 
-MAX_MEMORY = 1000000
+import PER_buffer
+
+
+MAX_MEMORY = 128000
 
 """
 Code taken from https://pytorch.org/tutorials/intermediate/reinforcement_q_learning.html
@@ -73,7 +76,7 @@ class Agent:
     ):
         pass
 
-temp = 16
+temp = 128
 class Actor(nn.Module):
     def __init__(self, in_dim, out_dim, max_val):
         super(Actor, self).__init__()
@@ -120,18 +123,20 @@ class Critic(nn.Module):
         return out
 
 class TD3(Agent):
-    def __init__(self, in_dim, out_dim, max_val, gamma = 0.99, target_learn=0.01, batch_size=128):
+    def __init__(self, in_dim, out_dim, max_val, noise = 0.25, copy_step = 2, gamma = 0.99, target_learn=0.005, batch_size=128):
         super().__init__()
         
         self.memory = ReplayMemory(in_dim, out_dim)
+        #self.memory = PER_buffer.PrioritizedReplayBuffer(MAX_MEMORY, 0.6) # prioritized replay alpha=0.6
+
 
         self.actor = Actor(in_dim, out_dim, max_val)
         self.actor_target = copy.deepcopy(self.actor)
-        self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=0.0001)
+        self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=0.001)
 
         self.critic = Critic(in_dim, out_dim)
         self.critic_target = copy.deepcopy(self.critic)
-        self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=0.001)
+        self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=0.0001)
 
         self.gamma = gamma
         self.target_learn = target_learn # tau
@@ -141,28 +146,45 @@ class TD3(Agent):
         self.current_step = 0
         self.in_dim = in_dim
         self.out_dim = out_dim
+        self.noise = noise
+        self.copy_step = copy_step
+
+    def load(self, actor, critic):
+        self.actor = copy.deepcopy(actor)
+        self.actor_target = copy.deepcopy(actor)
+        self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=0.001)
+
+        self.critic = copy.deepcopy(critic)
+        self.critic_target = copy.deepcopy(critic)
+        self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=0.0001)
 
 
     def choose_action(self, state, action_space):
         self.prev_state = torch.tensor(state, dtype=torch.float32)
-        self.action_taken = self.actor(self.prev_state).detach()
+        if (self.current_step < 10000):
+            self.action_taken = action_space.sample()
+        else:
+            self.action_taken = self.actor(self.prev_state).detach()
         return self.action_taken
     
     def update(self, new_state: np.ndarray, reward: float, is_terminal: bool, is_trunc: bool):
         self.current_step += 1
 
         new_state = torch.tensor(new_state, dtype=torch.float32)
+        
         self.memory.push(
             self.prev_state, self.action_taken, new_state, reward, is_terminal or is_trunc
         )
 
-        if self.memory.size < self.batch_size:
+        #self.memory.add(self.prev_state, self.action_taken, reward, new_state, is_terminal or is_trunc)
+
+        if self.memory.size < 10000:
             return
 
         with torch.no_grad():
             state, action, next_state, reward, terminal = self.memory.sample(self.batch_size)
-
-            noise = (torch.rand_like(action) * 0.1).clamp(-0.5, 0.5)
+            
+            noise = (torch.rand_like(action) * self.noise ).clamp(-0.5, 0.5) # * (0.99**(self.memory.size // 10000))
 
             next_action = (self.actor_target(next_state) + noise).clamp(-self.max_val, self.max_val)
             
@@ -177,7 +199,7 @@ class TD3(Agent):
         loss_critic.backward()
         self.critic_optim.step()
        
-        if self.current_step % 2 == 0:
+        if self.current_step % self.copy_step == 0:
             loss_actor = -self.critic.critic_1(state, self.actor(state)).mean()
             self.actor_optim.zero_grad()
             loss_actor.backward()
