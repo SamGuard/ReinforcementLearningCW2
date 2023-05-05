@@ -22,15 +22,17 @@ Transition = namedtuple(
 )
 
 class ReplayMemory(object):
-    def __init__(self, in_dim, out_dim):
+    def __init__(self, in_dim, out_dim, device="cpu"):
         self.curr = 0
         self.size = 0
 
-        self.state = np.zeros((MAX_MEMORY, in_dim))
-        self.action = np.zeros((MAX_MEMORY, out_dim))
-        self.next_state = np.zeros((MAX_MEMORY, in_dim))
-        self.reward = np.zeros((MAX_MEMORY,))
-        self.terminal = np.zeros((MAX_MEMORY,))
+        self.state = torch.zeros((MAX_MEMORY, in_dim), device=device)
+        self.action = torch.zeros((MAX_MEMORY, out_dim), device=device)
+        self.next_state = torch.zeros((MAX_MEMORY, in_dim), device=device)
+        self.reward = torch.zeros((MAX_MEMORY,), device=device)
+        self.terminal = torch.zeros((MAX_MEMORY,), device=device)
+
+        self.device = device
 
     def push(self, state, action, next_state, reward, terminal):
         self.state[self.curr] = state
@@ -46,11 +48,11 @@ class ReplayMemory(object):
         rand_elems = np.random.randint(0, self.size, size=batch_size)
 
         return (
-            torch.tensor(self.state[rand_elems], dtype=torch.float32),
-            torch.tensor(self.action[rand_elems], dtype=torch.float32),
-            torch.tensor(self.next_state[rand_elems], dtype=torch.float32),
-            torch.tensor(self.reward[rand_elems], dtype=torch.float32),
-            torch.tensor(self.terminal[rand_elems], dtype=torch.int)
+            self.state[rand_elems].clone(),
+            self.action[rand_elems].clone(),
+            self.next_state[rand_elems].clone(),
+            self.reward[rand_elems].clone(),
+            self.terminal[rand_elems].clone(),
         )
 
     def __len__(self):

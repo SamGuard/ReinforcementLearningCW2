@@ -59,20 +59,20 @@ class DDPG(Agent):
         device="cpu",
     ):
         super().__init__()
-        self.memory = ReplayMemory(in_dim, out_dim)
+        self.memory = ReplayMemory(in_dim, out_dim, device=device)
         self.actor = ActionClamper(
             in_dim, out_dim, width=256, depth=3, activation_function=F.relu
-        )
+        ).to(device)
         self.critic = ValueApproximator(
             in_dim + out_dim, 1, width=256, depth=3, activation_function=F.relu
-        )
+        ).to(device)
 
         self.actor_target = ActionClamper(
             in_dim, out_dim, width=256, depth=3, activation_function=F.relu
-        )
+        ).to(device)
         self.critic_target = ValueApproximator(
             in_dim + out_dim, 1, width=256, depth=3, activation_function=F.relu
-        )
+        ).to(device)
 
         self.actor_target.load_state_dict(deepcopy(self.actor.state_dict()))
         self.critic_target.load_state_dict(deepcopy(self.critic.state_dict()))
@@ -96,7 +96,7 @@ class DDPG(Agent):
         action_space: Box,
     ):
         self.prev_state = torch.tensor(state, device=self.device, dtype=torch.float32)
-        N = self.noise_level * torch.randn(1)
+        N = self.noise_level * torch.randn(1).to(self.device)
         self.action_taken = torch.clamp(
             self.max_val * (self.actor(self.prev_state).detach() + N),
             -self.max_val,
@@ -109,7 +109,7 @@ class DDPG(Agent):
     ):
         self.current_step += 1
 
-        new_state = torch.tensor(new_state, dtype=torch.float32)
+        new_state = torch.tensor(new_state, dtype=torch.float32, device=self.device)
         self.memory.push(
             self.prev_state,
             self.action_taken,
@@ -133,7 +133,7 @@ class DDPG(Agent):
 
         target_scores = self.critic_target(torch.cat((next_states, target_actions), 1))
 
-        y = torch.zeros(size=(self.batch_size,))
+        y = torch.zeros(size=(self.batch_size,), device=self.device)
         y[terminal_mask] = (self.gamma * target_scores).squeeze()
         y += rewards
         y = y.detach()
