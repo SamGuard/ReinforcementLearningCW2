@@ -12,8 +12,6 @@ import random
 
 from agents import ReplayMemory, Agent
 
-MAX_MEMORY = 2**17
-
 
 class ValueApproximator(nn.Module):
     def __init__(
@@ -57,23 +55,23 @@ class DDPG(Agent):
         max_val,
         gamma=0.99,
         target_learn=0.001,
-        batch_size=100,
+        batch_size=128,
         device="cpu",
     ):
         super().__init__()
         self.memory = ReplayMemory(in_dim, out_dim)
         self.actor = ActionClamper(
-            in_dim, out_dim, width=32, depth=5, activation_function=F.relu
+            in_dim, out_dim, width=256, depth=3, activation_function=F.relu
         )
         self.critic = ValueApproximator(
-            in_dim + out_dim, 1, width=32, depth=5, activation_function=F.relu
+            in_dim + out_dim, 1, width=256, depth=3, activation_function=F.relu
         )
 
         self.actor_target = ActionClamper(
-            in_dim, out_dim, width=32, depth=5, activation_function=F.relu
+            in_dim, out_dim, width=256, depth=3, activation_function=F.relu
         )
         self.critic_target = ValueApproximator(
-            in_dim + out_dim, 1, width=32, depth=5, activation_function=F.relu
+            in_dim + out_dim, 1, width=256, depth=3, activation_function=F.relu
         )
 
         self.actor_target.load_state_dict(deepcopy(self.actor.state_dict()))
@@ -90,6 +88,7 @@ class DDPG(Agent):
         self.max_val = max_val
         self.device = device
         self.current_step = 0
+        self.noise_level = 0.1
 
     def choose_action(
         self,
@@ -97,7 +96,7 @@ class DDPG(Agent):
         action_space: Box,
     ):
         self.prev_state = torch.tensor(state, device=self.device, dtype=torch.float32)
-        N = 0.1 * torch.randn(1)
+        N = self.noise_level * torch.randn(1)
         self.action_taken = torch.clamp(
             self.max_val * (self.actor(self.prev_state).detach() + N),
             -self.max_val,
@@ -168,3 +167,18 @@ class DDPG(Agent):
                 self.target_learn * weights.data
                 + (1.0 - self.target_learn) * target_weights.data
             )
+
+    def get_learners(self):
+        return deepcopy(self.actor),deepcopy(self.critic)
+    
+    def load(self, actor, critic, memory):
+        self.actor = deepcopy(actor)
+        self.critic = deepcopy(critic)
+        self.memory = deepcopy(memory)
+
+        self.actor_target.load_state_dict(deepcopy(self.actor.state_dict()))
+        self.critic_target.load_state_dict(deepcopy(self.critic.state_dict()))
+
+        self.actor_optim = torch.optim.Adam(self.actor.parameters(), 1e-4)
+        self.critic_optim = torch.optim.Adam(self.critic.parameters(), 1e-3)
+

@@ -11,7 +11,7 @@ from copy import deepcopy
 from collections import deque, namedtuple
 import random
 
-MAX_MEMORY = 1000000
+MAX_MEMORY = 2**17
 
 """
 Code taken from https://pytorch.org/tutorials/intermediate/reinforcement_q_learning.html
