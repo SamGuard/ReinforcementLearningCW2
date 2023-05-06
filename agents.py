@@ -2,61 +2,15 @@ import torch
 from torch import nn, Tensor
 from torch.nn import functional as F
 import numpy as np
-import math
 import copy
 
 from gymnasium.spaces import Box
 
 from copy import deepcopy
-from collections import deque, namedtuple
-import random
+
+from replay import ReplayMemory
 
 MAX_MEMORY = 2**17
-
-"""
-Code taken from https://pytorch.org/tutorials/intermediate/reinforcement_q_learning.html
-This code was used as it ReplayMemory is a very simple and useful class
-"""
-Transition = namedtuple(
-    "Transition", ("state", "action", "next_state", "reward", "terminal")
-)
-
-class ReplayMemory(object):
-    def __init__(self, in_dim, out_dim, device="cpu"):
-        self.curr = 0
-        self.size = 0
-
-        self.state = torch.zeros((MAX_MEMORY, in_dim), device=device)
-        self.action = torch.zeros((MAX_MEMORY, out_dim), device=device)
-        self.next_state = torch.zeros((MAX_MEMORY, in_dim), device=device)
-        self.reward = torch.zeros((MAX_MEMORY,), device=device)
-        self.terminal = torch.zeros((MAX_MEMORY,), device=device)
-
-        self.device = device
-
-    def push(self, state, action, next_state, reward, terminal):
-        self.state[self.curr] = state
-        self.action[self.curr] = action
-        self.next_state[self.curr] = next_state
-        self.reward[self.curr] = reward
-        self.terminal[self.curr] = terminal
-
-        self.curr = (self.curr + 1) % MAX_MEMORY
-        self.size = min(self.size + 1, MAX_MEMORY)
-    
-    def sample(self, batch_size):
-        rand_elems = np.random.randint(0, self.size, size=batch_size)
-
-        return (
-            self.state[rand_elems].clone(),
-            self.action[rand_elems].clone(),
-            self.next_state[rand_elems].clone(),
-            self.reward[rand_elems].clone(),
-            self.terminal[rand_elems].clone(),
-        )
-
-    def __len__(self):
-        return self.size
 
 class Agent:
     """

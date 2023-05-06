@@ -10,7 +10,8 @@ from copy import deepcopy
 from collections import deque, namedtuple
 import random
 
-from agents import ReplayMemory, Agent
+from agents import Agent
+from replay import ReplayMemory, PrioritiseReplay
 
 
 class ValueApproximator(nn.Module):
@@ -59,7 +60,7 @@ class DDPG(Agent):
         device="cpu",
     ):
         super().__init__()
-        self.memory = ReplayMemory(in_dim, out_dim, device=device)
+        self.memory = PrioritiseReplay(in_dim, out_dim, device=device)
         self.actor = ActionClamper(
             in_dim, out_dim, width=256, depth=3, activation_function=F.relu
         ).to(device)
@@ -121,7 +122,7 @@ class DDPG(Agent):
         if self.memory.size < self.batch_size:
             return
 
-        states, actions, next_states, rewards, terminal = self.memory.sample(
+        states, actions, next_states, rewards, terminal, indexs = self.memory.sample(
             self.batch_size
         )
 
@@ -137,6 +138,8 @@ class DDPG(Agent):
         y[terminal_mask] = (self.gamma * target_scores).squeeze()
         y += rewards
         y = y.detach()
+
+        self.memory.update_td(indexs, y.abs())
 
         current_scores = self.critic(torch.cat((states, actions), 1)).squeeze()
 
