@@ -82,7 +82,7 @@ class TD3(Agent):
     def __init__(self, in_dim, out_dim, max_val, gamma = 0.99, target_learn=0.01, batch_size=128):
         super().__init__()
         
-        self.memory = ReplayMemory(in_dim, out_dim)
+        self.memory = ReplayMemory(in_dim, out_dim, max_mem=2**17)
 
         self.actor = Actor(in_dim, out_dim, max_val)
         self.actor_target = copy.deepcopy(self.actor)

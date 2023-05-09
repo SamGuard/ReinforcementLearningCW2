@@ -5,24 +5,23 @@ from torch.nn import functional as F
 from collections import deque, namedtuple
 
 
-MAX_MEMORY = 2**17
-
-
 Transition = namedtuple(
     "Transition", ("state", "action", "next_state", "reward", "terminal")
 )
 
+MAX_MEMORY = 2**17
 
 class ReplayMemory(object):
-    def __init__(self, in_dim, out_dim, device="cpu"):
+    def __init__(self, in_dim, out_dim, max_mem, device="cpu"):
         self.curr = 0
         self.size = 0
-
-        self.state = torch.zeros((MAX_MEMORY, in_dim), device=device)
-        self.action = torch.zeros((MAX_MEMORY, out_dim), device=device)
-        self.next_state = torch.zeros((MAX_MEMORY, in_dim), device=device)
-        self.reward = torch.zeros((MAX_MEMORY,), device=device)
-        self.terminal = torch.zeros((MAX_MEMORY,), device=device)
+        
+        self.max_mem = max_mem
+        self.state = torch.zeros((self.max_mem, in_dim), device=device)
+        self.action = torch.zeros((self.max_mem, out_dim), device=device)
+        self.next_state = torch.zeros((self.max_mem, in_dim), device=device)
+        self.reward = torch.zeros((self.max_mem,), device=device)
+        self.terminal = torch.zeros((self.max_mem,), device=device)
 
         self.device = device
 
@@ -33,11 +32,11 @@ class ReplayMemory(object):
         self.reward[self.curr] = reward
         self.terminal[self.curr] = terminal
 
-        self.curr = (self.curr + 1) % MAX_MEMORY
-        self.size = min(self.size + 1, MAX_MEMORY)
+        self.curr = (self.curr + 1) % self.max_mem
+        self.size = min(self.size + 1, self.max_mem)
 
     def sample(self, batch_size):
-        rand_elems = torch.randint(0, self.size, size=batch_size)
+        rand_elems = torch.randint(0, self.size, size=(batch_size,))
 
         return (
             self.state[rand_elems].clone(),
@@ -52,6 +51,9 @@ class ReplayMemory(object):
 
 
 class PrioritiseReplay(object):
+    """
+    Doesnt work :(
+    """
     def __init__(self, in_dim, out_dim, device="cpu"):
         self.curr = 0
         self.size = 0
