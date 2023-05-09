@@ -32,7 +32,7 @@ class Agent:
     ):
         pass
 
-temp = 16
+temp = 128
 class Actor(nn.Module):
     def __init__(self, in_dim, out_dim, max_val):
         super(Actor, self).__init__()
@@ -79,18 +79,20 @@ class Critic(nn.Module):
         return out
 
 class TD3(Agent):
-    def __init__(self, in_dim, out_dim, max_val, gamma = 0.99, target_learn=0.01, batch_size=128):
+    def __init__(self, in_dim, out_dim, max_val, noise = 0.25, copy_step = 2, gamma = 0.99, target_learn=0.005, batch_size=128, device="cpu"):
         super().__init__()
         
-        self.memory = ReplayMemory(in_dim, out_dim, max_mem=2**17)
+        self.memory = ReplayMemory(in_dim, out_dim, max_mem=2**17, device=device)
 
-        self.actor = Actor(in_dim, out_dim, max_val)
+        self.actor = Actor(in_dim, out_dim, max_val).to(device)
         self.actor_target = copy.deepcopy(self.actor)
-        self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=0.0001)
+        self.actor_target = self.actor_target.to(device)
+        self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=0.001)
 
-        self.critic = Critic(in_dim, out_dim)
+        self.critic = Critic(in_dim, out_dim).to(device)
         self.critic_target = copy.deepcopy(self.critic)
-        self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=0.001)
+        self.critic_target = self.critic_target.to(device)
+        self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=0.0001)
 
         self.gamma = gamma
         self.target_learn = target_learn # tau
@@ -100,35 +102,39 @@ class TD3(Agent):
         self.current_step = 0
         self.in_dim = in_dim
         self.out_dim = out_dim
-
+        self.noise = noise
+        self.copy_step = copy_step
+        self.device = device
 
     def choose_action(self, state, action_space):
-        self.prev_state = torch.tensor(state, dtype=torch.float32)
-        self.action_taken = self.actor(self.prev_state).detach()
+        self.prev_state = torch.tensor(state, dtype=torch.float32, device=self.device)
+        if (self.current_step < 10000):
+            self.action_taken = action_space.sample()
+        else:
+            self.action_taken = self.actor(self.prev_state).detach()
         return self.action_taken
     
     def update(self, new_state: np.ndarray, reward: float, is_terminal: bool, is_trunc: bool):
         self.current_step += 1
 
-        new_state = torch.tensor(new_state, dtype=torch.float32)
+        new_state = torch.tensor(new_state, dtype=torch.float32, device=self.device)
+        
         self.memory.push(
             self.prev_state, self.action_taken, new_state, reward, is_terminal or is_trunc
         )
-
-        if self.memory.size < self.batch_size:
+        if self.memory.size < 10000:
             return
 
         with torch.no_grad():
             state, action, next_state, reward, terminal = self.memory.sample(self.batch_size)
-
-            noise = (torch.rand_like(action) * 0.1).clamp(-0.5, 0.5)
+            
+            noise = (torch.rand_like(action, device=self.device) * self.noise).clamp(-0.5, 0.5) # * (0.99**(self.memory.size // 10000))
 
             next_action = (self.actor_target(next_state) + noise).clamp(-self.max_val, self.max_val)
             
             target_critic_1, target_critic_2 = self.critic_target(next_state, next_action)
             target_critic = torch.min(target_critic_1, target_critic_2)
-            target_critic = reward + (1 - terminal) * self.gamma * target_critic
-
+            target_critic = reward + (1-terminal) * self.gamma * target_critic
 
         current_critic_1, current_critic_2 = self.critic(state, action)
         loss_critic = F.mse_loss(current_critic_1, target_critic) + F.mse_loss(current_critic_2, target_critic)
@@ -137,7 +143,7 @@ class TD3(Agent):
         loss_critic.backward()
         self.critic_optim.step()
        
-        if self.current_step % 2 == 0:
+        if self.current_step % self.copy_step == 0:
             loss_actor = -self.critic.critic_1(state, self.actor(state)).mean()
             self.actor_optim.zero_grad()
             loss_actor.backward()
