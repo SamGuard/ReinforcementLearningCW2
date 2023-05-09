@@ -62,17 +62,17 @@ class DDPG(Agent):
         super().__init__()
         self.memory = ReplayMemory(in_dim, out_dim, max_mem=2**17, device=device)
         self.actor = ActionClamper(
-            in_dim, out_dim, width=256, depth=3, activation_function=F.relu
+            in_dim, out_dim, width=128, depth=3, activation_function=F.relu
         ).to(device)
         self.critic = ValueApproximator(
-            in_dim + out_dim, 1, width=256, depth=3, activation_function=F.relu
+            in_dim + out_dim, 1, width=128, depth=3, activation_function=F.relu
         ).to(device)
 
         self.actor_target = ActionClamper(
-            in_dim, out_dim, width=256, depth=3, activation_function=F.relu
+            in_dim, out_dim, width=128, depth=3, activation_function=F.relu
         ).to(device)
         self.critic_target = ValueApproximator(
-            in_dim + out_dim, 1, width=256, depth=3, activation_function=F.relu
+            in_dim + out_dim, 1, width=128, depth=3, activation_function=F.relu
         ).to(device)
 
         self.actor_target.load_state_dict(deepcopy(self.actor.state_dict()))
@@ -97,12 +97,15 @@ class DDPG(Agent):
         action_space: Box,
     ):
         self.prev_state = torch.tensor(state, device=self.device, dtype=torch.float32)
-        N = self.noise_level * torch.randn(1).to(self.device)
-        self.action_taken = torch.clamp(
-            self.max_val * (self.actor(self.prev_state).detach() + N),
-            -self.max_val,
-            self.max_val,
-        )
+        if(self.memory.size < 10000):
+            self.action_taken = torch.tensor(action_space.sample())
+        else:
+            N = self.noise_level * torch.randn(1).to(self.device)
+            self.action_taken = torch.clamp(
+                self.max_val * (self.actor(self.prev_state).detach() + N),
+                -self.max_val,
+                self.max_val,
+            )
         return self.action_taken
 
     def update(
@@ -119,7 +122,7 @@ class DDPG(Agent):
             is_terminal or is_trunc,
         )
 
-        if self.memory.size < self.batch_size:
+        if self.memory.size < self.batch_size or self.memory.size < 10000:
             return
 
         states, actions, next_states, rewards, terminal = self.memory.sample(

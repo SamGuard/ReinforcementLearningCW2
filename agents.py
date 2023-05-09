@@ -109,7 +109,7 @@ class TD3(Agent):
     def choose_action(self, state, action_space):
         self.prev_state = torch.tensor(state, dtype=torch.float32, device=self.device)
         if (self.current_step < 10000):
-            self.action_taken = action_space.sample()
+            self.action_taken = torch.tensor(action_space.sample())
         else:
             self.action_taken = self.actor(self.prev_state).detach()
         return self.action_taken
