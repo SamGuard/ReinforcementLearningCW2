@@ -134,7 +134,7 @@ class TD3(Agent):
             
             target_critic_1, target_critic_2 = self.critic_target(next_state, next_action)
             target_critic = torch.min(target_critic_1, target_critic_2)
-            target_critic = reward + (1-terminal) * self.gamma * target_critic
+            target_critic = reward.reshape(-1, 1) + (1-terminal.reshape(-1, 1)) * self.gamma * target_critic
 
         current_critic_1, current_critic_2 = self.critic(state, action)
         loss_critic = F.mse_loss(current_critic_1, target_critic) + F.mse_loss(current_critic_2, target_critic)
