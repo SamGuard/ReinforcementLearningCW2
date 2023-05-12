@@ -6,8 +6,6 @@ import copy
 from gymnasium.spaces import Box
 from copy import deepcopy
 from replay import ReplayMemory
-from collections import deque, namedtuple
-import random
 
 
 MAX_MEMORY = 2**17
@@ -120,9 +118,6 @@ class ActionClamper(ValueApproximator):
     def forward(self, x: Tensor):
         ans = torch.tanh(super().forward(x))
         return ans
-
-
-
 
 
 
