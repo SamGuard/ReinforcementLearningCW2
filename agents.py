@@ -32,6 +32,7 @@ class Agent:
     ):
         pass
 
+# Actor & Critic class code inspired by https://towardsdatascience.com/td3-learning-to-run-with-ai-40dfc512f93
 temp = 128
 class Actor(nn.Module):
     def __init__(self, in_dim, out_dim, max_val):
